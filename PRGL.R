@@ -1,69 +1,133 @@
+
+# This code will process phenology data from SEL UTEP lab. 
+
+
+# load libraries
+# if you don't have a library can install manually or with eg: install.package("readxl")
 library(tidyverse)###contains dyplr
 library(readxl)
 library(lubridate)
 library(data.table)
 
-setwd("c:/UTEP/ThesisRelated/Data/Phenology/Data/PRGL")
-getwd() 
+setwd("~/Desktop/OneDrive - University of Texas at El Paso/SEL_Phenology")
+
 prgl <- read_excel("PRGL_2010_20191220.xlsx")
 
 #deleting #3s if 4s, if #3s and #4s have a 1, put DS03's value as zero into new column DS03_1
 prgl$DS03_1<-ifelse(prgl$DS04==1, 0, prgl$DS03)
 
-
-setnames(prgl, old = c('DS01','DS02', 'DS03_1', 'DS04', 'DS05', 'DS06', 'DS07', 'DS08', 'DS09', 'DS10', 'DS11'), #keeps this order
+# change the column names for PRGL
+setnames(prgl, old = c('DS01','DS02', 'DS03_1', 'DS04', 'DS05', 'DS06', 'DS07', 'DS08', 'DS09', 'DS10', 'DS11','DS12'), #keeps this order
          new = c('Breaking Leaf Bud','Young Unfolded Leaves', '>25% Full Leaf Size', '>= 75% Full Leaf Size', '>50% Leaves Fallen',
-                 'All Leaves Fallen', 'Flower Buds', 'Open Flowers', 'Full Flowering', 'Fruits', 'Ripe Fruits'))
+                 'All Leaves Fallen', 'Flower Buds', 'Open Flowers', 'Full Flowering', 'Fruits', 'Ripe Fruits','Dropped Fruits'))
 
-prgl_tidy <- prgl %>%
-  select(date_id, plant_id,`Breaking Leaf Bud`,`Young Unfolded Leaves`,`>25% Full Leaf Size`,`>= 75% Full Leaf Size`,
-         `>50% Leaves Fallen`,`All Leaves Fallen`) %>%   #pick variables by their name
+# FLCE
+# flce <- read_excel("FLCE_2010-20181102v2.xlsx")
+# setnames(flce, old = c('DS01','DS02', 'DS03', 'DS04', 'DS05', 'DS06', 'DS07', 'DS08', 'DS09', 'DS10', 'DS11', 'DS12'),
+ #        new = c('Breaking Leaf Bud','Young Unfolded Leaves', '>25% Full Leaf Size', '>= 75% full leaf size', '>50% leaves fallen',
+ #                'All leaves fallen', 'flower buds', 'Open flowers', 'Full Flowering', 'Fruits', 'Ripe fruits', 'Recent Fruit drops' ))
+
+# LATR
+# latr <- read_excel("LATR_20100309-20191220.xlsx")
+# latr$date_id <- as.Date(latr$date_id)
+# setnames(latr, old = c('BE01','BE02', 'BE03', 'BE04', 'BE05', 'BE06', 'BE07', 'BE08'),
+#         new = c('Breaking Leaf Bud','Young Unfolded Leaves', 'Flower buds', 
+#                 'Open Flowers', 'Full flowering', 'Fruits', 'Ripe fruits','Fruits from past growing season'))
+
+# MUPO
+# mupo <- read_excel("MUPO_2010-20181102v2.xlsx")
+# setnames(mupo, old = c('GR01','GR02', 'GR03', 'GR04', 'GR05', 'GR06', 'GR07'),
+#         new = c('Initial growth','Leaves', 'All leaves withered', 
+#                 'Flower heads', 'Open flowers', 'Grains', 'Ripe grains'))
+
+
+# Prepare Prgl for graphing. 
+# change data from wide to long format
+prgl_pheno <- prgl %>%
+  select(date_id, plant_id,`Flower Buds`,`Open Flowers`,`Full Flowering`,`Fruits`,
+         `Ripe Fruits`,`Dropped Fruits`) %>%   #pick variables by their name
   # select(-date_string) %>% # drop specifc columns
   gather(phenophase, occurrence, -date_id, -plant_id)%>%
   mutate(year = year(date_id))
 
-prgl_tidy_2 <- unique(prgl_tidy)
+# remove duplicate rows
+prgl_pheno <- unique(prgl_pheno)
 
-# TOTAL NUMBER OF PHENOPHASE EXPRESSIONS
-prgl_count_total <- prgl_tidy_2 %>%
+look <- prgl_pheno %>% 
+  filter(date_id==as.Date("2010-03-09") & phenophase=="Flower Buds")
+
+
+# Calculate total number of phenophase occurences on each date
+prgl_count_total <- prgl_pheno %>%
   group_by(date_id, year, phenophase) %>%  ### deleted plot column since the perenctage plot was over %100
   summarise(total_obs = length(occurrence))
 
-# TOTAL OBSERVATIONS MEASURED
-prgl_count_obs <- prgl_tidy_2 %>%
+# make graph to see how total count varies over time
+ggplot(prgl_count_total, aes(date_id, total_obs, colour=phenophase))+
+  geom_point()
+
+
+# sum the total number of observations. If all are 0 pheno_obs  will = 0
+# and if there are 1s, the 1s will get summed to give total number of individual in phenophase
+prgl_count_obs <- prgl_pheno %>%
   group_by(date_id, year, phenophase) %>%
   summarise(pheno_obs = sum(occurrence))
+
+
+# make graph of total obervations by phenophase
+ggplot(prgl_count_obs, aes(date_id, pheno_obs, colour=phenophase))+
+  geom_line()
+
+# graph with separated phenophases and separted years
+ggplot(prgl_count_obs, aes(yday(date_id), pheno_obs, colour=phenophase))+
+  geom_line()+
+  facet_grid(phenophase~year)
+
 ############################prgl_count_obs/prgl_count_total############################################
 
-# combine the total counts and the 1 counts and keep all the rows that exist in total count data frame
+# combine the totals and the summed observations into one data frame 
 prgl_count <- merge(prgl_count_total,prgl_count_obs,by=c("date_id","year","phenophase"),all.x=TRUE)
 
 # calculate the percent of individuals in a phenophase on each date
-prgl_count <- mutate(prgl_count,pheno_perc = (pheno_obs/total_obs)*100) %>%
-  mutate(doy = yday(date_id))#added this one 20191010, but it already included it before this date on previous prgl_count function
+# and get the day of year for each date
+prgl_count <- prgl_count %>% 
+  mutate(pheno_perc = (pheno_obs/total_obs)*100,
+         doy = yday(date_id))
 
-# give labels according to the phenophase type
-prgl_count_labels <- prgl_count %>%
-  # divide phenophase into life stages
-  mutate(pheno_type = ifelse(phenophase %in% c("Breaking Leaf Bud","Young Unfolded Leaves", ">25% Full Leaf Size",
-                                               ">= 75% Full Leaf Size", ">50% Leaves Fallen",
-                                               "All Leaves Fallen"), "primary production", "reproduction")) %>%
-  # group into life stages
-  #mutate(pheno_detail = factor(ifelse(phenophase %in% c("A-Breaking Leaf Bud","B-Young Unfolded Leaves"),"leaf out",
-  #                            ifelse(phenophase %in% c("C->25% Full Leaf Size", "D->= 75% full leaf size"), "greening", "senescing")),
-  #                             levels=c("leaf out","greening","senescing"))) %>% 
-  # create day of year column
-  mutate(doy = yday(date_id))
+# organise levels of phenophase to graph in sequential order of when phenophases occur
+prgl_count <- prgl_count %>% 
+  mutate(phenophase = factor(phenophase, 
+                             levels=c("Flower Buds","Open Flowers","Full Flowering",
+                                      "Fruits","Ripe Fruits", "Dropped Fruits")))
 
-prgl_count_labels$phenophase = factor(prgl_count_labels$phenophase, 
-                                      levels = c("Breaking Leaf Bud","Young Unfolded Leaves",
-                                                 ">25% Full Leaf Size", ">= 75% Full Leaf Size",
-                                                  ">50% Leaves Fallen", "All Leaves Fallen"))
+# plot to test levels
+ggplot(prgl_count, aes(doy, pheno_obs, colour=phenophase))+
+  geom_line()+
+  facet_grid(phenophase~year) # rows~columns
+
 
 #plots primary phenophases as all years in X variable and % phenophase as Y variable
-ggplot(subset(prgl_count_labels,pheno_type=="primary production"),
-       aes(date_id,pheno_perc,colour=phenophase))+geom_line(size=1.2)+ggtitle("Honey mesquite") + facet_grid(phenophase~.) +
-  theme(axis.title.x = element_text(face = "bold", size = 25), axis.text=element_text(size=30), 
-        axis.title.y = element_text(face = "bold", size = 25), axis.text.y = element_text(size = 25),
-        strip.text.y = element_text(size=25, face="bold"),
-        plot.title = element_text(size = 30, face = "bold", color = "red"))
+ggplot(prgl_count,aes(date_id,pheno_perc,colour=phenophase))+
+  geom_line(size=1.2)+
+  labs(title="Honey mesquite Flowering and Fruit", x="date", y="Percent occurrence") +
+  facet_grid(phenophase~.) +
+  theme_bw()
+
+
+# graph with subset of years
+# (plyr package)
+prgl_count %>%
+  filter(year == 2013) %>% # can also do things like year>2013 or year >= 2013
+  ggplot(.,aes(date_id,pheno_perc,colour=phenophase))+
+  geom_line(size=1.2)+
+  labs(title="Honey mesquite Flowering and Fruit", x="date", y="Percent occurrence") +
+  facet_grid(phenophase~.) +
+  theme_bw()
+
+prgl_count %>%
+  filter(year == 2013 & month(date_id)==8) %>% # can also do things like year>2013 or year >= 2013
+  ggplot(.,aes(date_id,pheno_perc,colour=phenophase))+
+  geom_line(size=1.2)+
+  labs(title="Honey mesquite Flowering and Fruit", x="date", y="Percent occurrence") +
+  facet_grid(phenophase~.) +
+  theme_bw()
